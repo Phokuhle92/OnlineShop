@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# EF and HTTP test files
+*.http
+Migrations/
+
+# Others
+*.log
+.env
+bin/
+obj/
+Migrations/
+.vs/
