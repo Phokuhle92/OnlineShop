@@ -12,7 +12,7 @@ namespace OnlineShop.API.Data
             // Build config to get connection string
             IConfigurationRoot configuration = new ConfigurationBuilder()
                 .SetBasePath(Directory.GetCurrentDirectory())
-                .AddJsonFile("appsettings.json")
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
                 .Build();
 
             var builder = new DbContextOptionsBuilder<AppDbContext>();

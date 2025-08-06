@@ -20,13 +20,18 @@ namespace OnlineShop.API.Controllers
     public class AuthController : ControllerBase
     {
         private readonly UserManager<ApplicationUser> _userManager;
+        private readonly RoleManager<IdentityRole> _roleManager;
         private readonly IConfiguration _config;
 
         private static readonly ConcurrentDictionary<string, OtpEntry> _otpStore = new();
 
-        public AuthController(UserManager<ApplicationUser> userManager, IConfiguration config)
+        public AuthController(
+            UserManager<ApplicationUser> userManager,
+            RoleManager<IdentityRole> roleManager,
+            IConfiguration config)
         {
             _userManager = userManager;
+            _roleManager = roleManager;
             _config = config;
         }
 
@@ -107,6 +112,16 @@ namespace OnlineShop.API.Controllers
             if (!_otpStore.TryGetValue(dto.Email, out var otpEntry) || !otpEntry.IsVerified)
                 return BadRequest("Email not verified via OTP.");
 
+            // Ensure role exists
+            var roleName = string.IsNullOrWhiteSpace(dto.Role) ? "Customer" : dto.Role;
+
+            if (!await _roleManager.RoleExistsAsync(roleName))
+            {
+                var roleResult = await _roleManager.CreateAsync(new IdentityRole(roleName));
+                if (!roleResult.Succeeded)
+                    return BadRequest("Failed to create role.");
+            }
+
             var user = new ApplicationUser
             {
                 UserName = dto.Email,
@@ -118,6 +133,9 @@ namespace OnlineShop.API.Controllers
             var result = await _userManager.CreateAsync(user, dto.Password);
             if (!result.Succeeded)
                 return BadRequest(result.Errors);
+
+            // Assign role to user
+            await _userManager.AddToRoleAsync(user, roleName);
 
             var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
             await _userManager.ConfirmEmailAsync(user, token);
@@ -137,13 +155,14 @@ namespace OnlineShop.API.Controllers
             if (!await _userManager.IsEmailConfirmedAsync(user))
                 return Unauthorized("Email not confirmed");
 
-            var token = GenerateJwtToken(user);
+            var token = await GenerateJwtToken(user);
+            var roles = await _userManager.GetRolesAsync(user);
 
             return Ok(new
             {
                 token,
                 message = "Login successful",
-                user = new { user.Id, user.Email, user.UserName }
+                user = new { user.Id, user.Email, user.UserName, Roles = roles }
             });
         }
 
@@ -185,14 +204,21 @@ namespace OnlineShop.API.Controllers
             return Ok("Password has been reset successfully.");
         }
 
-        private string GenerateJwtToken(ApplicationUser user)
+        private async Task<string> GenerateJwtToken(ApplicationUser user)
         {
-            var claims = new[]
+            var roles = await _userManager.GetRolesAsync(user);
+
+            var claims = new List<Claim>
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.Email),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
                 new Claim(ClaimTypes.NameIdentifier, user.Id)
             };
+
+            foreach (var role in roles)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, role));
+            }
 
             var key = _config["Jwt:Key"];
             if (string.IsNullOrWhiteSpace(key))
