@@ -1,7 +1,6 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using OnlineShop.API.Models;
 using OnlineShop.API.Models.Entities;
 
 namespace OnlineShop.API.Data
@@ -67,10 +66,13 @@ namespace OnlineShop.API.Data
                       .IsRequired();
 
                 entity.HasOne(o => o.User)
-                      .WithMany() // or .WithMany(u => u.Orders) if you add a collection in ApplicationUser
+                      .WithMany() // or .WithMany(u => u.Orders) if you add an Orders collection in ApplicationUser
                       .HasForeignKey(o => o.UserId)
                       .IsRequired()
                       .OnDelete(DeleteBehavior.Restrict);
+
+                entity.Property(o => o.TotalAmount)
+                      .HasColumnType("decimal(18,2)");
 
                 entity.HasMany(o => o.OrderItems)
                       .WithOne(oi => oi.Order)

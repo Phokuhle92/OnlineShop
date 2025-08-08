@@ -1,55 +1,31 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using OnlineShop.API.Data;
 using OnlineShop.API.Interfaces;
 using OnlineShop.API.Models;
 using OnlineShop.API.Services;
-using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container
+// Add services
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
-// Configure Swagger with JWT Bearer auth support
+// Swagger (no JWT since using cookie auth)
 builder.Services.AddSwaggerGen(c =>
 {
-    // Add JWT Authorization to Swagger UI
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        In = ParameterLocation.Header,
-        Description = "Enter JWT Bearer token **only**, e.g. 'Bearer eyJhbGciOiJI...'"
-    });
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "OnlineShop API", Version = "v1" });
 
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            new string[] {}
-        }
-    });
+    // Optional: Add cookie auth support in Swagger if desired (not automatic)
 });
 
-// Configure SQL Server DbContext
+// Database
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Configure Identity with roles
+// Identity setup
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 {
     options.Password.RequireDigit = true;
@@ -60,54 +36,42 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 .AddEntityFrameworkStores<AppDbContext>()
 .AddDefaultTokenProviders();
 
-// Configure JWT Authentication
-var jwtKey = builder.Configuration["Jwt:Key"];
-if (string.IsNullOrWhiteSpace(jwtKey))
-{
-    throw new InvalidOperationException("JWT Key not configured");
-}
-
-builder.Services.AddAuthentication(options =>
-{
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-.AddJwtBearer(options =>
-{
-    options.RequireHttpsMetadata = false; // true in production
-    options.SaveToken = true;
-    options.TokenValidationParameters = new TokenValidationParameters
+// Cookie Authentication setup (replaces JWT)
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
     {
-        ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-        ValidateIssuer = false, // configure issuer & audience in production
-        ValidateAudience = false,
-        ClockSkew = TimeSpan.Zero
-    };
-});
+        options.LoginPath = "/api/auth/login"; // Endpoint or redirect URL for login
+        options.AccessDeniedPath = "/api/auth/access-denied"; // Optional: access denied endpoint
+        options.ExpireTimeSpan = TimeSpan.FromHours(1);
+        options.SlidingExpiration = true;
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.None; // Change to Always in production with HTTPS
+        options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Strict;
+    });
 
-// Add Authorization
+// Authorization
 builder.Services.AddAuthorization();
 
-// Configure CORS for frontend
+// CORS: Allow credentials (cookies) from frontend
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3003")
+        policy.WithOrigins("http://localhost:3003") // frontend origin
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .AllowCredentials();
     });
 });
 
-// Register application services
+// Application services
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<ICategoryService, CategoryService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 
 var app = builder.Build();
 
-// Seed roles and apply migrations on startup
+// Seed roles and migrate DB
 await SeedRolesAndMigrateDatabaseAsync(app);
 
 if (app.Environment.IsDevelopment())
@@ -120,16 +84,13 @@ app.UseHttpsRedirection();
 
 app.UseCors("AllowFrontend");
 
-// IMPORTANT: Authentication must come before Authorization
-app.UseAuthentication();
+app.UseAuthentication(); // must be before UseAuthorization
 app.UseAuthorization();
 
 app.MapControllers();
 
 app.Run();
 
-
-// Local async function to seed roles and migrate database
 async Task SeedRolesAndMigrateDatabaseAsync(WebApplication app)
 {
     using var scope = app.Services.CreateScope();
@@ -139,8 +100,7 @@ async Task SeedRolesAndMigrateDatabaseAsync(WebApplication app)
 
     foreach (var role in roles)
     {
-        var exists = await roleManager.RoleExistsAsync(role);
-        if (!exists)
+        if (!await roleManager.RoleExistsAsync(role))
         {
             await roleManager.CreateAsync(new IdentityRole(role));
         }

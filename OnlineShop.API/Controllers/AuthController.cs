@@ -8,10 +8,6 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using MailKit.Net.Smtp;
 using MimeKit;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 using System.Collections.Generic;
 
 namespace OnlineShop.API.Controllers
@@ -113,7 +109,6 @@ namespace OnlineShop.API.Controllers
             if (!_otpStore.TryGetValue(dto.Email, out var otpEntry) || !otpEntry.IsVerified)
                 return BadRequest(new { message = "Email not verified via OTP." });
 
-            // Ensure role exists
             var roleName = string.IsNullOrWhiteSpace(dto.Role) ? "Customer" : dto.Role;
 
             if (!await _roleManager.RoleExistsAsync(roleName))
@@ -135,15 +130,12 @@ namespace OnlineShop.API.Controllers
             if (!result.Succeeded)
                 return BadRequest(result.Errors);
 
-            // Assign role to user
             await _userManager.AddToRoleAsync(user, roleName);
 
-            var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
-            await _userManager.ConfirmEmailAsync(user, token);
-
+            // Remove OTP after successful registration
             _otpStore.TryRemove(dto.Email, out _);
 
-            return Ok(new { message = "User registered and email confirmed." });
+            return Ok(new { message = "User registered successfully. You can now login." });
         }
 
         [HttpPost("login")]
@@ -153,19 +145,62 @@ namespace OnlineShop.API.Controllers
             if (user == null || !await _userManager.CheckPasswordAsync(user, dto.Password))
                 return Unauthorized("Invalid credentials");
 
-            if (!await _userManager.IsEmailConfirmedAsync(user))
-                return Unauthorized("Email not confirmed");
+            // **No email confirmation check here**
 
-            var token = await GenerateJwtToken(user);
+            // Generate and send OTP after successful login credentials verification
+            var otpCode = GenerateOtp();
+            var otpEntry = new OtpEntry
+            {
+                Email = dto.Email,
+                OtpCode = otpCode,
+                ExpiryTime = DateTime.UtcNow.AddMinutes(5),
+                IsVerified = false
+            };
+            _otpStore.AddOrUpdate(dto.Email, otpEntry, (key, old) => otpEntry);
+
+            await SendEmailAsync(dto.Email, "Your Login OTP Code", $"Your OTP code is {otpCode}");
+
             var roles = await _userManager.GetRolesAsync(user);
-
-            // Determine dashboard path or identifier based on role priority
             string dashboard = GetDashboardByRoles(roles);
 
+            // Do NOT return token yet, require OTP verification first
             return Ok(new
             {
-                token,
-                message = "Login successful",
+                message = "Login successful. OTP sent to your email. Please verify OTP to complete login.",
+                user = new { user.Id, user.Email, user.UserName, Roles = roles },
+                dashboard
+            });
+        }
+
+        [HttpPost("verify-otp-login")]
+        public async Task<IActionResult> VerifyOtpLogin([FromBody] VerifyOnlyOtpDto otpRequest)
+        {
+            if (!_otpStore.TryGetValue(otpRequest.Email, out var storedOtp))
+                return BadRequest(new { message = "OTP not found. Please request a new OTP." });
+
+            if (storedOtp.ExpiryTime < DateTime.UtcNow)
+            {
+                _otpStore.TryRemove(otpRequest.Email, out _);
+                return BadRequest(new { message = "OTP expired. Please request a new OTP." });
+            }
+
+            if (storedOtp.OtpCode != otpRequest.OtpCode)
+                return BadRequest(new { message = "Invalid OTP." });
+
+            storedOtp.IsVerified = true;
+            _otpStore.TryRemove(otpRequest.Email, out _); // Remove OTP after successful verification
+
+            var user = await _userManager.FindByEmailAsync(otpRequest.Email);
+            if (user == null)
+                return BadRequest(new { message = "User not found." });
+
+            var roles = await _userManager.GetRolesAsync(user);
+            string dashboard = GetDashboardByRoles(roles);
+
+            // Return user info without JWT token
+            return Ok(new
+            {
+                message = "OTP verified, login complete.",
                 user = new { user.Id, user.Email, user.UserName, Roles = roles },
                 dashboard
             });
@@ -173,17 +208,13 @@ namespace OnlineShop.API.Controllers
 
         private string GetDashboardByRoles(IList<string> roles)
         {
-            // Define priority of roles for dashboard redirect
             if (roles.Contains("Admin")) return "/admin/dashboard";
             if (roles.Contains("ProductOwner")) return "/productowner/dashboard";
             if (roles.Contains("StoreUser")) return "/storeuser/dashboard";
             if (roles.Contains("Manager")) return "/manager/dashboard";
             if (roles.Contains("Customer")) return "/customer/dashboard";
-
-            // Default fallback
             return "/dashboard";
         }
-
 
         [HttpPost("forgot-password")]
         public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
@@ -195,65 +226,55 @@ namespace OnlineShop.API.Controllers
             if (user == null)
                 return BadRequest(new { message = "User not found." });
 
-            var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
-            string resetLink = $"{_config["FrontendUrl"]}/reset-password?email={Uri.EscapeDataString(dto.Email)}&token={Uri.EscapeDataString(resetToken)}";
+            var otpCode = GenerateOtp();
 
-            await SendEmailAsync(dto.Email, "Password Reset Request",
-                $"You requested a password reset. Use the following link:\n\n{resetLink}\n\nIf you did not request this, ignore this email.");
+            var otpEntry = new OtpEntry
+            {
+                Email = dto.Email,
+                OtpCode = otpCode,
+                ExpiryTime = DateTime.UtcNow.AddMinutes(5),
+                IsVerified = false
+            };
 
-            return Ok(new { message = "Password reset email sent." });
+            _otpStore.AddOrUpdate(dto.Email, otpEntry, (key, old) => otpEntry);
+
+            await SendEmailAsync(dto.Email, "Password Reset OTP", $"Your OTP code to reset your password is: {otpCode}");
+
+            return Ok(new { message = "OTP sent to your email. Use it to reset your password." });
         }
 
         [HttpPost("reset-password")]
-        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto dto)
+        public async Task<IActionResult> ResetPasswordWithOtp([FromBody] ResetPasswordWithOtpDto dto)
         {
             if (!IsValidEmail(dto.Email))
                 return BadRequest(new { message = "Valid email is required." });
+
+            if (!_otpStore.TryGetValue(dto.Email, out var storedOtp))
+                return BadRequest(new { message = "OTP not found. Please request a new OTP." });
+
+            if (storedOtp.ExpiryTime < DateTime.UtcNow)
+            {
+                _otpStore.TryRemove(dto.Email, out _);
+                return BadRequest(new { message = "OTP expired. Please request a new OTP." });
+            }
+
+            if (storedOtp.OtpCode != dto.OtpCode)
+                return BadRequest(new { message = "Invalid OTP." });
 
             var user = await _userManager.FindByEmailAsync(dto.Email);
             if (user == null)
                 return BadRequest(new { message = "User not found." });
 
-            var decodedToken = Uri.UnescapeDataString(dto.Token);
+            var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
 
-            var result = await _userManager.ResetPasswordAsync(user, decodedToken, dto.NewPassword);
-            if (!result.Succeeded)
-                return BadRequest(result.Errors);
+            var resetResult = await _userManager.ResetPasswordAsync(user, resetToken, dto.NewPassword);
+            if (!resetResult.Succeeded)
+                return BadRequest(resetResult.Errors);
+
+            _otpStore.TryRemove(dto.Email, out _);
 
             return Ok(new { message = "Password has been reset successfully." });
         }
 
-        private async Task<string> GenerateJwtToken(ApplicationUser user)
-        {
-            var roles = await _userManager.GetRolesAsync(user);
-
-            var claims = new List<Claim>
-            {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Email),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-                new Claim(ClaimTypes.NameIdentifier, user.Id)
-            };
-
-            foreach (var role in roles)
-            {
-                claims.Add(new Claim(ClaimTypes.Role, role));
-            }
-
-            var key = _config["Jwt:Key"];
-            if (string.IsNullOrWhiteSpace(key))
-                throw new ArgumentNullException("JWT Secret Key is missing in configuration");
-
-            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
-            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken(
-                issuer: _config["Jwt:Issuer"] ?? "OnlineShop",
-                audience: _config["Jwt:Audience"] ?? "OnlineShopUsers",
-                claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(60),
-                signingCredentials: credentials);
-
-            return new JwtSecurityTokenHandler().WriteToken(token);
-        }
     }
 }

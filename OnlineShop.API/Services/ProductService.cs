@@ -3,7 +3,6 @@ using OnlineShop.API.Data;
 using OnlineShop.API.Interfaces;
 using OnlineShop.API.Models;
 using OnlineShop.API.Models.DTOs.ProductDTOs;
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -19,7 +18,7 @@ namespace OnlineShop.API.Services
             _context = context;
         }
 
-        public async Task<List<ProductReadDto>> GetAllAsync()
+        public async Task<IEnumerable<ProductReadDto>> GetAllProductsAsync()
         {
             return await _context.Products
                 .Include(p => p.Category)
@@ -38,29 +37,27 @@ namespace OnlineShop.API.Services
                 .ToListAsync();
         }
 
-        public async Task<ProductReadDto?> GetByIdAsync(int id)
+        public async Task<ProductReadDto?> GetProductByIdAsync(int id)
         {
-            var p = await _context.Products
+            return await _context.Products
                 .Include(p => p.Category)
-                .FirstOrDefaultAsync(p => p.Id == id);
-
-            if (p == null) return null;
-
-            return new ProductReadDto
-            {
-                Id = p.Id,
-                Name = p.Name,
-                Description = p.Description,
-                Price = p.Price,
-                Stock = p.Stock,
-                ImageUrl = p.ImageUrl,
-                CreatedAt = p.CreatedAt,
-                CategoryId = p.CategoryId,
-                CategoryName = p.Category?.Name
-            };
+                .Where(p => p.Id == id)
+                .Select(p => new ProductReadDto
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    Description = p.Description,
+                    Price = p.Price,
+                    Stock = p.Stock,
+                    ImageUrl = p.ImageUrl,
+                    CreatedAt = p.CreatedAt,
+                    CategoryId = p.CategoryId,
+                    CategoryName = p.Category != null ? p.Category.Name : null
+                })
+                .FirstOrDefaultAsync();
         }
 
-        public async Task<ProductReadDto> CreateAsync(ProductCreateDto dto)
+        public async Task<ProductReadDto> CreateProductAsync(ProductCreateDto dto)
         {
             var product = new Product
             {
@@ -75,10 +72,21 @@ namespace OnlineShop.API.Services
             _context.Products.Add(product);
             await _context.SaveChangesAsync();
 
-            return await GetByIdAsync(product.Id) ?? throw new Exception("Failed to retrieve created product.");
+            return new ProductReadDto
+            {
+                Id = product.Id,
+                Name = product.Name,
+                Description = product.Description,
+                Price = product.Price,
+                Stock = product.Stock,
+                ImageUrl = product.ImageUrl,
+                CreatedAt = product.CreatedAt,
+                CategoryId = product.CategoryId,
+                CategoryName = null // no navigation here, could load if needed
+            };
         }
 
-        public async Task<bool> UpdateAsync(int id, ProductUpdateDto dto)
+        public async Task<bool> UpdateProductAsync(int id, ProductUpdateDto dto)
         {
             var product = await _context.Products.FindAsync(id);
             if (product == null) return false;
@@ -90,17 +98,20 @@ namespace OnlineShop.API.Services
             product.ImageUrl = dto.ImageUrl;
             product.CategoryId = dto.CategoryId;
 
+            _context.Products.Update(product);
             await _context.SaveChangesAsync();
+
             return true;
         }
 
-        public async Task<bool> DeleteAsync(int id)
+        public async Task<bool> DeleteProductAsync(int id)
         {
             var product = await _context.Products.FindAsync(id);
             if (product == null) return false;
 
             _context.Products.Remove(product);
             await _context.SaveChangesAsync();
+
             return true;
         }
     }

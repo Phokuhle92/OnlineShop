@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace OnlineShop.API.Models
+namespace OnlineShop.API.Models.Entities
 {
     public class Category
     {

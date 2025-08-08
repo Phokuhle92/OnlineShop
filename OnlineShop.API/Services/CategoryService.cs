@@ -1,8 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using OnlineShop.API.Data;
 using OnlineShop.API.Interfaces;
-using OnlineShop.API.Models;
 using OnlineShop.API.Models.DTOs.CategoryDTOs;
+using OnlineShop.API.Models.Entities;  // <-- Add this line
 using System.Collections.Generic;
 using System.Threading.Tasks;
 

@@ -1,56 +1,60 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using OnlineShop.API.Models.DTOs.ProductDTOs;
 using OnlineShop.API.Interfaces;
-using OnlineShop.API.Services;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
-namespace OnlineShop.API.Controllers
+namespace OnlineShop.API.Controllers.Products
 {
-    [Route("api/[controller]")]
+    [Route("api/products")]
     [ApiController]
-    public class ProductsController : ControllerBase
+    public class ProductController : ControllerBase
     {
-        private readonly IProductService _service;
+        private readonly IProductService _productService;
 
-        public ProductsController(IProductService service)
+        public ProductController(IProductService productService)
         {
-            _service = service;
+            _productService = productService;
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetAll()
+        public async Task<ActionResult<IEnumerable<ProductReadDto>>> GetAll()
         {
-            var products = await _service.GetAllAsync();
+            var products = await _productService.GetAllProductsAsync();
             return Ok(products);
         }
 
         [HttpGet("{id}")]
-        public async Task<IActionResult> GetById(int id)
+        public async Task<ActionResult<ProductReadDto>> GetById(int id)
         {
-            var product = await _service.GetByIdAsync(id);
+            var product = await _productService.GetProductByIdAsync(id);
             if (product == null) return NotFound();
             return Ok(product);
         }
 
         [HttpPost]
-        public async Task<IActionResult> Create(ProductCreateDto dto)
+        [Authorize(Roles = "Admin,ProductOwner")]
+        public async Task<ActionResult<ProductReadDto>> Create(ProductCreateDto dto)
         {
-            var created = await _service.CreateAsync(dto);
-            return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+            var createdProduct = await _productService.CreateProductAsync(dto);
+            return CreatedAtAction(nameof(GetById), new { id = createdProduct.Id }, createdProduct);
         }
 
         [HttpPut("{id}")]
+        [Authorize(Roles = "Admin,ProductOwner")]
         public async Task<IActionResult> Update(int id, ProductUpdateDto dto)
         {
-            var updated = await _service.UpdateAsync(id, dto);
+            var updated = await _productService.UpdateProductAsync(id, dto);
             if (!updated) return NotFound();
             return NoContent();
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Roles = "Admin,ProductOwner")]
         public async Task<IActionResult> Delete(int id)
         {
-            var deleted = await _service.DeleteAsync(id);
+            var deleted = await _productService.DeleteProductAsync(id);
             if (!deleted) return NotFound();
             return NoContent();
         }
