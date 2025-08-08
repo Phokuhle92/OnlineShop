@@ -12,8 +12,6 @@ namespace OnlineShop.API.Data
 
         public DbSet<Product> Products { get; set; }
         public DbSet<Category> Categories { get; set; }
-
-        // Added DbSets for orders and order items
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderItem> OrderItems { get; set; }
 
@@ -33,9 +31,6 @@ namespace OnlineShop.API.Data
             // Product configuration
             builder.Entity<Product>(entity =>
             {
-                entity.Property(p => p.Price)
-                      .HasColumnType("decimal(18,2)");
-
                 entity.Property(p => p.Name)
                       .IsRequired()
                       .HasMaxLength(100);
@@ -45,6 +40,9 @@ namespace OnlineShop.API.Data
 
                 entity.Property(p => p.ImageUrl)
                       .HasMaxLength(500);
+
+                entity.Property(p => p.Price)
+                      .HasColumnType("decimal(18,2)");
 
                 entity.HasOne(p => p.Category)
                       .WithMany(c => c.Products)
@@ -64,7 +62,15 @@ namespace OnlineShop.API.Data
             builder.Entity<Order>(entity =>
             {
                 entity.HasKey(o => o.Id);
-                entity.Property(o => o.Status).IsRequired();
+
+                entity.Property(o => o.Status)
+                      .IsRequired();
+
+                entity.HasOne(o => o.User)
+                      .WithMany() // or .WithMany(u => u.Orders) if you add a collection in ApplicationUser
+                      .HasForeignKey(o => o.UserId)
+                      .IsRequired()
+                      .OnDelete(DeleteBehavior.Restrict);
 
                 entity.HasMany(o => o.OrderItems)
                       .WithOne(oi => oi.Order)
@@ -80,9 +86,8 @@ namespace OnlineShop.API.Data
                 entity.Property(oi => oi.UnitPrice)
                       .HasColumnType("decimal(18,2)");
 
-                // Configure relationship to Product
                 entity.HasOne(oi => oi.Product)
-                      .WithMany() // If Product has no navigation property for OrderItems
+                      .WithMany()
                       .HasForeignKey(oi => oi.ProductId)
                       .OnDelete(DeleteBehavior.Restrict);
             });

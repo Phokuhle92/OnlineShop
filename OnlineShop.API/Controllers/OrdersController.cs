@@ -1,88 +1,249 @@
 ﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using OnlineShop.API.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using OnlineShop.API.Data;
 using OnlineShop.API.Models.DTOs.OrderDTOs;
+using OnlineShop.API.Models.Entities;
+using System.Security.Claims;
 
-[ApiController]
-[Route("api/[controller]")]
-[Authorize(Roles = "Customer")]  // Only Customers allowed
-public class OrdersController : ControllerBase
+namespace OnlineShop.API.Controllers
 {
-    private readonly IOrderService _orderService;
-    private readonly UserManager<ApplicationUser> _userManager;
-
-    public OrdersController(IOrderService orderService, UserManager<ApplicationUser> userManager)
+    [Route("api/[controller]")]
+    [ApiController]
+    [Authorize(Roles = "Customer,Admin,Manager")] // Admin/Manager allowed for some endpoints
+    public class OrdersController : ControllerBase
     {
-        _orderService = orderService;
-        _userManager = userManager;
-    }
+        private readonly AppDbContext _context;
 
-    [HttpPost]
-    public async Task<IActionResult> CreateOrder([FromBody] CreateOrderDto orderDto)
-    {
-        var userId = _userManager.GetUserId(User);
-        if (string.IsNullOrEmpty(userId))
-            return Unauthorized(new { message = "User is not authorized to create orders." });
-
-        try
+        public OrdersController(AppDbContext context)
         {
-            var result = await _orderService.CreateOrderAsync(userId, orderDto);
-            return Ok(new { message = "Order created successfully.", order = result });
+            _context = context;
         }
-        catch (Exception ex)
+
+        // Customer creates order
+        [HttpPost]
+        [Authorize(Roles = "Customer")]
+        public async Task<IActionResult> CreateOrder(CreateOrderDto dto)
         {
-            return BadRequest(new { message = $"Failed to create order: {ex.Message}" });
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized("User not authenticated.");
+
+            var userExists = await _context.Users.AnyAsync(u => u.Id == userId);
+            if (!userExists)
+                return Unauthorized("User not found.");
+
+            if (dto.Items == null || !dto.Items.Any())
+                return BadRequest("No items in order.");
+
+            var productIds = dto.Items.Select(i => i.ProductId).ToList();
+            var products = await _context.Products
+                                         .Where(p => productIds.Contains(p.Id))
+                                         .ToListAsync();
+
+            if (products.Count != dto.Items.Count)
+                return BadRequest("One or more products not found.");
+
+            var orderItems = new List<OrderItem>();
+            decimal totalAmount = 0;
+
+            foreach (var item in dto.Items)
+            {
+                var product = products.FirstOrDefault(p => p.Id == item.ProductId);
+                if (product == null)
+                    continue;
+
+                if (product.Stock < item.Quantity)
+                    return BadRequest($"Not enough stock for product {product.Name}");
+
+                product.Stock -= item.Quantity;
+
+                orderItems.Add(new OrderItem
+                {
+                    ProductId = item.ProductId,
+                    Quantity = item.Quantity,
+                    UnitPrice = product.Price
+                });
+
+                totalAmount += product.Price * item.Quantity;
+            }
+
+            var order = new Order
+            {
+                UserId = userId,
+                OrderDate = DateTime.UtcNow,
+                TotalAmount = totalAmount,
+                Status = "Pending",
+                OrderItems = orderItems
+            };
+
+            _context.Orders.Add(order);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                Message = "Order placed successfully",
+                OrderId = order.Id,
+                Total = order.TotalAmount
+            });
         }
-    }
 
-    [HttpGet]
-    public async Task<IActionResult> GetMyOrders()
-    {
-        var userId = _userManager.GetUserId(User);
-        if (string.IsNullOrEmpty(userId))
-            return Unauthorized(new { message = "User is not authorized to view orders." });
 
-        var result = await _orderService.GetUserOrdersAsync(userId);
-        if (result == null || result.Count == 0)
-            return Ok(new { message = "No orders found for this user.", orders = result });
-
-        return Ok(new { message = "Orders retrieved successfully.", orders = result });
-    }
-
-    [HttpPut("{orderId}")]
-    public async Task<IActionResult> UpdateOrder(int orderId, [FromBody] CreateOrderDto orderDto)
-    {
-        var userId = _userManager.GetUserId(User);
-        if (string.IsNullOrEmpty(userId))
-            return Unauthorized(new { message = "User is not authorized to update orders." });
-
-        try
+        // Customer gets own orders
+        [HttpGet("my")]
+        [Authorize(Roles = "Customer")]
+        public async Task<IActionResult> GetMyOrders()
         {
-            var updatedOrder = await _orderService.UpdateOrderAsync(userId, orderId, orderDto);
-            return Ok(new { message = "Order updated successfully.", order = updatedOrder });
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized("User not authenticated.");
+
+            var orders = await _context.Orders
+                .Where(o => o.UserId == userId)
+                .Include(o => o.OrderItems)
+                    .ThenInclude(oi => oi.Product)
+                .OrderByDescending(o => o.OrderDate)
+                .ToListAsync();
+
+            return Ok(orders);
         }
-        catch (Exception ex)
-        {
-            return BadRequest(new { message = $"Failed to update order: {ex.Message}" });
-        }
-    }
 
-    [HttpDelete("{orderId}")]
-    public async Task<IActionResult> DeleteOrder(int orderId)
-    {
-        var userId = _userManager.GetUserId(User);
-        if (string.IsNullOrEmpty(userId))
-            return Unauthorized(new { message = "User is not authorized to delete orders." });
+        // Customer updates order (only Pending)
+        [HttpPut("{orderId}")]
+        [Authorize(Roles = "Customer")]
+        public async Task<IActionResult> UpdateOrder(int orderId, [FromBody] CreateOrderDto dto)
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized("User not authenticated.");
 
-        try
-        {
-            await _orderService.DeleteOrderAsync(userId, orderId);
-            return Ok(new { message = "Order deleted successfully." });
+            var order = await _context.Orders
+                .Include(o => o.OrderItems)
+                .FirstOrDefaultAsync(o => o.Id == orderId && o.UserId == userId);
+
+            if (order == null)
+                return NotFound("Order not found.");
+
+            if (order.Status != "Pending")
+                return BadRequest("Only pending orders can be updated.");
+
+            if (dto.Items == null || !dto.Items.Any())
+                return BadRequest("No items in order.");
+
+            // Restore stock from old order items
+            foreach (var oldItem in order.OrderItems)
+            {
+                var product = await _context.Products.FindAsync(oldItem.ProductId);
+                if (product != null)
+                    product.Stock += oldItem.Quantity;
+            }
+
+            // Remove old order items
+            _context.OrderItems.RemoveRange(order.OrderItems);
+
+            var productIds = dto.Items.Select(i => i.ProductId).ToList();
+            var products = await _context.Products
+                                         .Where(p => productIds.Contains(p.Id))
+                                         .ToListAsync();
+
+            if (products.Count != dto.Items.Count)
+                return BadRequest("One or more products not found.");
+
+            var newOrderItems = new List<OrderItem>();
+            decimal totalAmount = 0;
+
+            foreach (var item in dto.Items)
+            {
+                var product = products.FirstOrDefault(p => p.Id == item.ProductId);
+                if (product == null)
+                    continue;
+
+                if (product.Stock < item.Quantity)
+                    return BadRequest($"Not enough stock for product {product.Name}");
+
+                product.Stock -= item.Quantity;
+
+                newOrderItems.Add(new OrderItem
+                {
+                    ProductId = item.ProductId,
+                    Quantity = item.Quantity,
+                    UnitPrice = product.Price
+                });
+
+                totalAmount += product.Price * item.Quantity;
+            }
+
+            order.OrderItems = newOrderItems;
+            order.TotalAmount = totalAmount;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { Message = "Order updated successfully", order.Id, order.TotalAmount });
         }
-        catch (Exception ex)
+
+        // Customer deletes order (only Pending)
+        [HttpDelete("{orderId}")]
+        [Authorize(Roles = "Customer")]
+        public async Task<IActionResult> DeleteOrder(int orderId)
         {
-            return BadRequest(new { message = $"Failed to delete order: {ex.Message}" });
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized("User not authenticated.");
+
+            var order = await _context.Orders
+                .Include(o => o.OrderItems)
+                .FirstOrDefaultAsync(o => o.Id == orderId && o.UserId == userId);
+
+            if (order == null)
+                return NotFound("Order not found.");
+
+            if (order.Status != "Pending")
+                return BadRequest("Only pending orders can be deleted.");
+
+            // Restore stock
+            foreach (var item in order.OrderItems)
+            {
+                var product = await _context.Products.FindAsync(item.ProductId);
+                if (product != null)
+                    product.Stock += item.Quantity;
+            }
+
+            _context.OrderItems.RemoveRange(order.OrderItems);
+            _context.Orders.Remove(order);
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { Message = "Order deleted successfully" });
+        }
+
+        // Admin or Manager: Get all orders
+        [HttpGet("all")]
+        [Authorize(Roles = "Admin,Manager")]
+        public async Task<IActionResult> GetAllOrders()
+        {
+            var orders = await _context.Orders
+                .Include(o => o.OrderItems)
+                    .ThenInclude(oi => oi.Product)
+                .OrderByDescending(o => o.OrderDate)
+                .ToListAsync();
+
+            var result = orders.Select(o => new
+            {
+                o.Id,
+                o.OrderDate,
+                o.TotalAmount,
+                o.Status,
+                o.UserId,
+                Items = o.OrderItems.Select(oi => new
+                {
+                    oi.ProductId,
+                    ProductName = oi.Product.Name,
+                    oi.Quantity,
+                    oi.UnitPrice
+                })
+            });
+
+            return Ok(result);
         }
     }
 }

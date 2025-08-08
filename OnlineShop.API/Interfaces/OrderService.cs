@@ -1,111 +1,171 @@
-﻿using OnlineShop.API.Data;
+﻿using Microsoft.EntityFrameworkCore;
+using OnlineShop.API.Data;
 using OnlineShop.API.Models.DTOs.OrderDTOs;
 using OnlineShop.API.Models.Entities;
-using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-
-namespace OnlineShop.API.Interfaces
+using OnlineShop.API.Interfaces;
+public class OrderService : IOrderService
 {
-    public class OrderService : IOrderService
+    private readonly AppDbContext _context;
+
+    public OrderService(AppDbContext context)
     {
-        private readonly AppDbContext _context;
+        _context = context;
+    }
 
-        public OrderService(AppDbContext context)
+    public async Task<Order> CreateOrderAsync(string userId, CreateOrderDto dto)
+    {
+        if (dto.Items == null || !dto.Items.Any())
+            throw new ArgumentException("Order must have at least one item.");
+
+        var productIds = dto.Items.Select(i => i.ProductId).ToList();
+        var products = await _context.Products
+                                     .Where(p => productIds.Contains(p.Id))
+                                     .ToListAsync();
+
+        if (products.Count != dto.Items.Count)
+            throw new KeyNotFoundException("One or more products not found.");
+
+        var orderItems = new List<OrderItem>();
+        decimal totalAmount = 0m;
+
+        foreach (var item in dto.Items)
         {
-            _context = context;
-        }
+            var product = products.First(p => p.Id == item.ProductId);
 
-        public async Task<OrderResponseDto> CreateOrderAsync(string userId, CreateOrderDto orderDto)
-        {
-            // Your existing CreateOrderAsync implementation here...
-            throw new NotImplementedException();
-        }
+            if (product.Stock < item.Quantity)
+                throw new InvalidOperationException($"Not enough stock for product '{product.Name}'.");
 
-        public async Task<List<OrderResponseDto>> GetUserOrdersAsync(string userId)
-        {
-            // Your existing GetUserOrdersAsync implementation here...
-            throw new NotImplementedException();
-        }
+            product.Stock -= item.Quantity;
 
-        public async Task<OrderResponseDto> UpdateOrderAsync(string userId, int orderId, CreateOrderDto orderDto)
-        {
-            var order = await _context.Orders
-                .Include(o => o.OrderItems)
-                .FirstOrDefaultAsync(o => o.Id == orderId && o.UserId == userId);
-
-            if (order == null)
-                throw new Exception("Order not found");
-
-            // Clear existing order items and restore stock
-            foreach (var existingItem in order.OrderItems)
+            var orderItem = new OrderItem
             {
-                var product = await _context.Products.FindAsync(existingItem.ProductId);
-                if (product != null)
-                    product.Stock += existingItem.Quantity;
-            }
-            _context.OrderItems.RemoveRange(order.OrderItems);
-
-            order.OrderItems.Clear();
-
-            // Add new items and reduce stock
-            foreach (var item in orderDto.Items)
-            {
-                var product = await _context.Products.FindAsync(item.ProductId);
-                if (product == null || product.Stock < item.Quantity)
-                    throw new Exception("Invalid product or insufficient stock");
-
-                product.Stock -= item.Quantity;
-
-                order.OrderItems.Add(new OrderItem
-                {
-                    ProductId = item.ProductId,
-                    Quantity = item.Quantity,
-                    UnitPrice = product.Price
-                });
-            }
-
-            order.Status = "Updated";
-            order.OrderDate = DateTime.UtcNow;
-
-            await _context.SaveChangesAsync();
-
-            return new OrderResponseDto
-            {
-                OrderId = order.Id,
-                OrderDate = order.OrderDate,
-                Status = order.Status,
-                Items = order.OrderItems.Select(i => new OrderItemDetailsDto
-                {
-                    ProductId = i.ProductId,
-                    ProductName = i.Product?.Name ?? "",
-                    Quantity = i.Quantity,
-                    UnitPrice = i.UnitPrice
-                }).ToList()
+                ProductId = product.Id,
+                Quantity = item.Quantity,
+                UnitPrice = product.Price
             };
+
+            orderItems.Add(orderItem);
+            totalAmount += product.Price * item.Quantity;
         }
 
-        public async Task DeleteOrderAsync(string userId, int orderId)
+        var order = new Order
         {
-            var order = await _context.Orders
-                .Include(o => o.OrderItems)
-                .FirstOrDefaultAsync(o => o.Id == orderId && o.UserId == userId);
+            UserId = userId,
+            OrderDate = DateTime.UtcNow,
+            TotalAmount = totalAmount,
+            Status = "Pending",
+            OrderItems = orderItems
+        };
 
-            if (order == null)
-                throw new Exception("Order not found");
+        _context.Orders.Add(order);
+        await _context.SaveChangesAsync();
 
-            // Restore stock
-            foreach (var item in order.OrderItems)
+        return order;
+    }
+
+    public async Task<List<Order>> GetUserOrdersAsync(string userId)
+    {
+        return await _context.Orders
+            .Where(o => o.UserId == userId)
+            .Include(o => o.OrderItems)
+                .ThenInclude(oi => oi.Product)
+            .OrderByDescending(o => o.OrderDate)
+            .ToListAsync();
+    }
+
+    public async Task<Order> UpdateOrderAsync(string userId, int orderId, CreateOrderDto dto)
+    {
+        var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.UserId == userId);
+
+        if (order == null)
+            throw new KeyNotFoundException("Order not found or does not belong to user.");
+
+        if (dto.Items == null || !dto.Items.Any())
+            throw new ArgumentException("Order must have at least one item.");
+
+        // Restore stock for old order items
+        foreach (var oldItem in order.OrderItems)
+        {
+            var product = await _context.Products.FindAsync(oldItem.ProductId);
+            if (product != null)
             {
-                var product = await _context.Products.FindAsync(item.ProductId);
-                if (product != null)
-                    product.Stock += item.Quantity;
+                product.Stock += oldItem.Quantity;
             }
-
-            _context.Orders.Remove(order);
-            await _context.SaveChangesAsync();
         }
+
+        _context.OrderItems.RemoveRange(order.OrderItems);
+        await _context.SaveChangesAsync();
+
+        var productIds = dto.Items.Select(i => i.ProductId).ToList();
+        var products = await _context.Products.Where(p => productIds.Contains(p.Id)).ToListAsync();
+
+        if (products.Count != dto.Items.Count)
+            throw new KeyNotFoundException("One or more products not found.");
+
+        var newOrderItems = new List<OrderItem>();
+        decimal totalAmount = 0m;
+
+        foreach (var item in dto.Items)
+        {
+            var product = products.First(p => p.Id == item.ProductId);
+
+            if (product.Stock < item.Quantity)
+                throw new InvalidOperationException($"Not enough stock for product '{product.Name}'.");
+
+            product.Stock -= item.Quantity;
+
+            var orderItem = new OrderItem
+            {
+                ProductId = product.Id,
+                Quantity = item.Quantity,
+                UnitPrice = product.Price
+            };
+
+            newOrderItems.Add(orderItem);
+            totalAmount += product.Price * item.Quantity;
+        }
+
+        order.OrderItems = newOrderItems;
+        order.TotalAmount = totalAmount;
+        order.OrderDate = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return order;
+    }
+
+    public async Task DeleteOrderAsync(string userId, int orderId)
+    {
+        var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .FirstOrDefaultAsync(o => o.Id == orderId && o.UserId == userId);
+
+        if (order == null)
+            throw new KeyNotFoundException("Order not found or does not belong to user.");
+
+        // Restore stock
+        foreach (var item in order.OrderItems)
+        {
+            var product = await _context.Products.FindAsync(item.ProductId);
+            if (product != null)
+            {
+                product.Stock += item.Quantity;
+            }
+        }
+
+        _context.OrderItems.RemoveRange(order.OrderItems);
+        _context.Orders.Remove(order);
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task<List<Order>> GetAllOrdersAsync()
+    {
+        return await _context.Orders
+            .Include(o => o.OrderItems)
+                .ThenInclude(oi => oi.Product)
+            .OrderByDescending(o => o.OrderDate)
+            .ToListAsync();
     }
 }

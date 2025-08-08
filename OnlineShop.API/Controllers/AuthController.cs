@@ -12,6 +12,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Collections.Generic;
 
 namespace OnlineShop.API.Controllers
 {
@@ -66,7 +67,7 @@ namespace OnlineShop.API.Controllers
         public async Task<IActionResult> SendOtp([FromBody] SendOtpRequest request)
         {
             if (request == null || !IsValidEmail(request.Email))
-                return BadRequest("Valid email is required.");
+                return BadRequest(new { message = "Valid email is required." });
 
             var otpCode = GenerateOtp();
 
@@ -89,28 +90,28 @@ namespace OnlineShop.API.Controllers
         public IActionResult VerifyOtp([FromBody] VerifyOnlyOtpDto otpRequest)
         {
             if (!_otpStore.TryGetValue(otpRequest.Email, out var storedOtp))
-                return BadRequest("OTP not found. Please request a new OTP.");
+                return BadRequest(new { message = "OTP not found. Please request a new OTP." });
 
             if (storedOtp.ExpiryTime < DateTime.UtcNow)
             {
                 _otpStore.TryRemove(otpRequest.Email, out _);
-                return BadRequest("OTP expired. Please request a new OTP.");
+                return BadRequest(new { message = "OTP expired. Please request a new OTP." });
             }
 
             if (storedOtp.OtpCode != otpRequest.OtpCode)
-                return BadRequest("Invalid OTP.");
+                return BadRequest(new { message = "Invalid OTP." });
 
             storedOtp.IsVerified = true;
             _otpStore[otpRequest.Email] = storedOtp;
 
-            return Ok("OTP verified successfully");
+            return Ok(new { message = "OTP verified successfully" });
         }
 
         [HttpPost("register")]
         public async Task<IActionResult> Register(RegisterDto dto)
         {
             if (!_otpStore.TryGetValue(dto.Email, out var otpEntry) || !otpEntry.IsVerified)
-                return BadRequest("Email not verified via OTP.");
+                return BadRequest(new { message = "Email not verified via OTP." });
 
             // Ensure role exists
             var roleName = string.IsNullOrWhiteSpace(dto.Role) ? "Customer" : dto.Role;
@@ -119,7 +120,7 @@ namespace OnlineShop.API.Controllers
             {
                 var roleResult = await _roleManager.CreateAsync(new IdentityRole(roleName));
                 if (!roleResult.Succeeded)
-                    return BadRequest("Failed to create role.");
+                    return BadRequest(new { message = "Failed to create role." });
             }
 
             var user = new ApplicationUser
@@ -142,7 +143,7 @@ namespace OnlineShop.API.Controllers
 
             _otpStore.TryRemove(dto.Email, out _);
 
-            return Ok("User registered and email confirmed.");
+            return Ok(new { message = "User registered and email confirmed." });
         }
 
         [HttpPost("login")]
@@ -158,23 +159,41 @@ namespace OnlineShop.API.Controllers
             var token = await GenerateJwtToken(user);
             var roles = await _userManager.GetRolesAsync(user);
 
+            // Determine dashboard path or identifier based on role priority
+            string dashboard = GetDashboardByRoles(roles);
+
             return Ok(new
             {
                 token,
                 message = "Login successful",
-                user = new { user.Id, user.Email, user.UserName, Roles = roles }
+                user = new { user.Id, user.Email, user.UserName, Roles = roles },
+                dashboard
             });
         }
+
+        private string GetDashboardByRoles(IList<string> roles)
+        {
+            // Define priority of roles for dashboard redirect
+            if (roles.Contains("Admin")) return "/admin/dashboard";
+            if (roles.Contains("ProductOwner")) return "/productowner/dashboard";
+            if (roles.Contains("StoreUser")) return "/storeuser/dashboard";
+            if (roles.Contains("Manager")) return "/manager/dashboard";
+            if (roles.Contains("Customer")) return "/customer/dashboard";
+
+            // Default fallback
+            return "/dashboard";
+        }
+
 
         [HttpPost("forgot-password")]
         public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
         {
             if (!IsValidEmail(dto.Email))
-                return BadRequest("Valid email is required.");
+                return BadRequest(new { message = "Valid email is required." });
 
             var user = await _userManager.FindByEmailAsync(dto.Email);
             if (user == null)
-                return BadRequest("User not found.");
+                return BadRequest(new { message = "User not found." });
 
             var resetToken = await _userManager.GeneratePasswordResetTokenAsync(user);
             string resetLink = $"{_config["FrontendUrl"]}/reset-password?email={Uri.EscapeDataString(dto.Email)}&token={Uri.EscapeDataString(resetToken)}";
@@ -182,18 +201,18 @@ namespace OnlineShop.API.Controllers
             await SendEmailAsync(dto.Email, "Password Reset Request",
                 $"You requested a password reset. Use the following link:\n\n{resetLink}\n\nIf you did not request this, ignore this email.");
 
-            return Ok("Password reset email sent.");
+            return Ok(new { message = "Password reset email sent." });
         }
 
         [HttpPost("reset-password")]
         public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto dto)
         {
             if (!IsValidEmail(dto.Email))
-                return BadRequest("Valid email is required.");
+                return BadRequest(new { message = "Valid email is required." });
 
             var user = await _userManager.FindByEmailAsync(dto.Email);
             if (user == null)
-                return BadRequest("User not found.");
+                return BadRequest(new { message = "User not found." });
 
             var decodedToken = Uri.UnescapeDataString(dto.Token);
 
@@ -201,7 +220,7 @@ namespace OnlineShop.API.Controllers
             if (!result.Succeeded)
                 return BadRequest(result.Errors);
 
-            return Ok("Password has been reset successfully.");
+            return Ok(new { message = "Password has been reset successfully." });
         }
 
         private async Task<string> GenerateJwtToken(ApplicationUser user)

@@ -1,0 +1,11 @@
+﻿namespace OnlineShop.API.Helpers
+{
+    public static class RoleConstants
+    {
+        public const string Admin = "Admin";
+        public const string Customer = "Customer";
+        public const string StoreUser = "StoreUser";
+        public const string ProductOwner = "ProductOwner";
+        public const string Manager = "Manager";
+    }
+}

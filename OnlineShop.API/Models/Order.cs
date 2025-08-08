@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace OnlineShop.API.Models.Entities
 {
@@ -6,15 +7,18 @@ namespace OnlineShop.API.Models.Entities
     {
         public int Id { get; set; }
 
+        [Required]
         public string UserId { get; set; } = string.Empty;
 
-        public DateTime OrderDate { get; set; }
+        [ForeignKey(nameof(UserId))]
+        public ApplicationUser User { get; set; }  // ✅ Add this navigation
+
+        public DateTime OrderDate { get; set; } = DateTime.UtcNow;
 
         public decimal TotalAmount { get; set; }
 
         public string Status { get; set; } = "Pending";
 
-        // ✅ This is required for the error to go away
         public List<OrderItem> OrderItems { get; set; } = new();
     }
 }
