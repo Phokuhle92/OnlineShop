@@ -3729,11 +3729,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\215701115\\Documents\\OnlineShop\\OnlineShop.API\\OnlineShop.API\\OnlineShop.API.csproj",
+      "projectUniqueName": "C:\\Users\\215701115\\Pictures\\OnlineShop\\OnlineShop.API\\OnlineShop.API\\OnlineShop.API.csproj",
       "projectName": "OnlineShop.API",
-      "projectPath": "C:\\Users\\215701115\\Documents\\OnlineShop\\OnlineShop.API\\OnlineShop.API\\OnlineShop.API.csproj",
+      "projectPath": "C:\\Users\\215701115\\Pictures\\OnlineShop\\OnlineShop.API\\OnlineShop.API\\OnlineShop.API.csproj",
       "packagesPath": "C:\\Users\\215701115\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\215701115\\Documents\\OnlineShop\\OnlineShop.API\\OnlineShop.API\\obj\\",
+      "outputPath": "C:\\Users\\215701115\\Pictures\\OnlineShop\\OnlineShop.API\\OnlineShop.API\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\215701115\\AppData\\Roaming\\NuGet\\NuGet.Config",
