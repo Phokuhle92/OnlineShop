@@ -1,53 +1,56 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using OnlineShop.API.Data;
+using OnlineShop.API.Services;
+using System.Threading.Tasks;
+using System.Linq;
 
 namespace OnlineShop.API.Controllers.Dashboards
 {
-    [Authorize(Roles = "ProductOwner")]
     [ApiController]
     [Route("api/dashboard/productowner")]
+    [Authorize(Roles = "ProductOwner")]
     public class ProductOwnerDashboardController : ControllerBase
     {
-        // Example: GET /api/dashboard/productowner/summary
-        [HttpGet("summary")]
-        public IActionResult GetProductOwnerSummary()
-        {
-            var summary = new
-            {
-                WelcomeMessage = "Welcome to your Product Owner Dashboard!",
-                TotalProducts = 87,
-                ProductsInStock = 65,
-                TotalRevenue = 125000.75
-            };
+        private readonly AppDbContext _context;
 
-            return Ok(summary);
+        public ProductOwnerDashboardController(AppDbContext context)
+        {
+            _context = context;
         }
 
-        // Example: GET /api/dashboard/productowner/products
-        [HttpGet("products")]
-        public IActionResult GetOwnedProducts()
+        [HttpGet]
+        public async Task<IActionResult> GetDashboard()
         {
-            var products = new[]
+            var ownerId = User.FindFirst("sub")?.Value;
+
+            var products = await _context.Products
+                .Include(p => p.OrderItems)
+                .Where(p => p.OwnerId == ownerId)
+                .ToListAsync();
+
+            var totalProducts = products.Count;
+            var totalStock = products.Sum(p => p.Stock);
+            var totalOrders = products.Sum(p => p.OrderItems.Count);
+            var totalRevenue = products.Sum(p => p.OrderItems.Sum(oi => oi.Quantity * oi.UnitPrice));
+
+            return Ok(new
             {
-                new { ProductId = 1, Name = "Smartphone X1", Sales = 240 },
-                new { ProductId = 2, Name = "Bluetooth Speaker", Sales = 102 }
-            };
-
-            return Ok(products);
-        }
-
-        // Example: GET /api/dashboard/productowner/sales
-        [HttpGet("sales")]
-        public IActionResult GetSalesSummary()
-        {
-            var sales = new
-            {
-                TotalOrders = 550,
-                MonthlySales = 12000.00,
-                BestSellingProduct = "Smartphone X1"
-            };
-
-            return Ok(sales);
+                totalProducts,
+                totalStock,
+                totalOrders,
+                totalRevenue,
+                topProducts = products
+                    .OrderByDescending(p => p.OrderItems.Count)
+                    .Take(5)
+                    .Select(p => new
+                    {
+                        p.Id,
+                        p.Name,
+                        SoldCount = p.OrderItems.Count
+                    })
+            });
         }
     }
 }

@@ -1,16 +1,15 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OnlineShop.API.Data;
 using OnlineShop.API.Models.DTOs.OrderDTOs;
 using OnlineShop.API.Models.Entities;
 using System.Security.Claims;
-
+using Microsoft.AspNetCore.Authorization;
 namespace OnlineShop.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize(Roles = "Customer,Admin,Manager")] // Admin/Manager allowed for some endpoints
+    [Authorize(Roles = "Customer")] // ONLY Customers allowed by default
     public class OrdersController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -22,7 +21,6 @@ namespace OnlineShop.API.Controllers
 
         // Customer creates order
         [HttpPost]
-        [Authorize(Roles = "Customer")]
         public async Task<IActionResult> CreateOrder(CreateOrderDto dto)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -88,10 +86,8 @@ namespace OnlineShop.API.Controllers
             });
         }
 
-
         // Customer gets own orders
         [HttpGet("my")]
-        [Authorize(Roles = "Customer")]
         public async Task<IActionResult> GetMyOrders()
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -100,17 +96,28 @@ namespace OnlineShop.API.Controllers
 
             var orders = await _context.Orders
                 .Where(o => o.UserId == userId)
+                .OrderByDescending(o => o.OrderDate)
                 .Include(o => o.OrderItems)
                     .ThenInclude(oi => oi.Product)
-                .OrderByDescending(o => o.OrderDate)
+                .Select(o => new OrderDto
+                {
+                    Id = o.Id,
+                    OrderDate = o.OrderDate,
+                    TotalAmount = o.OrderItems.Sum(oi => oi.UnitPrice * oi.Quantity),
+                    Items = o.OrderItems.Select(oi => new OrderItemDetailsDto
+                    {
+                        ProductId = oi.ProductId,
+                        ProductName = oi.Product != null ? oi.Product.Name : string.Empty,
+                        Quantity = oi.Quantity,
+                        UnitPrice = oi.UnitPrice
+                    }).ToList()
+                })
                 .ToListAsync();
 
             return Ok(orders);
         }
-
         // Customer updates order (only Pending)
         [HttpPut("{orderId}")]
-        [Authorize(Roles = "Customer")]
         public async Task<IActionResult> UpdateOrder(int orderId, [FromBody] CreateOrderDto dto)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -183,7 +190,6 @@ namespace OnlineShop.API.Controllers
 
         // Customer deletes order (only Pending)
         [HttpDelete("{orderId}")]
-        [Authorize(Roles = "Customer")]
         public async Task<IActionResult> DeleteOrder(int orderId)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -216,7 +222,7 @@ namespace OnlineShop.API.Controllers
             return Ok(new { Message = "Order deleted successfully" });
         }
 
-        // Admin or Manager: Get all orders
+        // Admin or Manager: Get all orders (Only Admin and Manager)
         [HttpGet("all")]
         [Authorize(Roles = "Admin,Manager")]
         public async Task<IActionResult> GetAllOrders()

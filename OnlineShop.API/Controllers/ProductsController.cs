@@ -24,6 +24,14 @@ namespace OnlineShop.API.Controllers.Products
             var products = await _productService.GetAllProductsAsync();
             return Ok(products);
         }
+        // GET: api/products/search/{name}
+        [HttpGet("search/{name}")]
+        public async Task<ActionResult<IEnumerable<ProductReadDto>>> SearchByName(string name)
+        {
+            var products = await _productService.SearchProductsByNameAsync(name);
+            if (products == null || !products.Any()) return NotFound();
+            return Ok(products);
+        }
 
         [HttpGet("{id}")]
         public async Task<ActionResult<ProductReadDto>> GetById(int id)
@@ -35,7 +43,7 @@ namespace OnlineShop.API.Controllers.Products
 
         [HttpPost]
         [Authorize(Roles = "Admin,ProductOwner")]
-        public async Task<ActionResult<ProductReadDto>> Create(ProductCreateDto dto)
+        public async Task<ActionResult<ProductReadDto>> Create([FromForm] ProductCreateDto dto)
         {
             var createdProduct = await _productService.CreateProductAsync(dto);
             return CreatedAtAction(nameof(GetById), new { id = createdProduct.Id }, createdProduct);
@@ -43,7 +51,7 @@ namespace OnlineShop.API.Controllers.Products
 
         [HttpPut("{id}")]
         [Authorize(Roles = "Admin,ProductOwner")]
-        public async Task<IActionResult> Update(int id, ProductUpdateDto dto)
+        public async Task<IActionResult> Update(int id, [FromForm] ProductUpdateDto dto)
         {
             var updated = await _productService.UpdateProductAsync(id, dto);
             if (!updated) return NotFound();

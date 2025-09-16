@@ -11,11 +11,15 @@ namespace OnlineShop.API.Models.Entities
         public ApplicationUser User { get; set; } = null!;
 
         public DateTime OrderDate { get; set; } = DateTime.UtcNow;
+        public string Status { get; set; } = "Pending";
 
-        public string Status { get; set; } = "Pending"; // e.g., Pending, Completed, Cancelled
-
-        public decimal TotalAmount { get; set; }  // now writable, store total
+        public decimal TotalAmount { get; set; }
 
         public ICollection<OrderItem> OrderItems { get; set; } = new List<OrderItem>();
+
+        // Optional: snapshot of name at the time of order
+        public string CustomerName { get; set; } = string.Empty;
     }
+
+
 }

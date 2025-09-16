@@ -8,6 +8,10 @@ namespace OnlineShop.API.Interfaces
     {
         Task<IEnumerable<ProductReadDto>> GetAllProductsAsync();
         Task<ProductReadDto?> GetProductByIdAsync(int id);
+        //Task<IEnumerable<ProductReadDto>> SearchProductsByNameAsync(string name); // ✅ fixed
+        Task<IEnumerable<ProductReadDto>> SearchProductsByNameAsync(string name, int page = 1, int pageSize = 10);
+
+        // Updated to match DTO with IFormFile for image upload
         Task<ProductReadDto> CreateProductAsync(ProductCreateDto dto);
         Task<bool> UpdateProductAsync(int id, ProductUpdateDto dto);
         Task<bool> DeleteProductAsync(int id);

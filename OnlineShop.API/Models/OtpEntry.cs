@@ -8,5 +8,6 @@ namespace OnlineShop.API.Models
         public string OtpCode { get; set; } = string.Empty;
         public DateTime ExpiryTime { get; set; }
         public bool IsVerified { get; set; }
+        public string Role { get; set; } = string.Empty; // Role instead of Purpose
     }
 }

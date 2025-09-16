@@ -1,7 +1,10 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using OnlineShop.API.Models;
 using OnlineShop.API.Models.Entities;
+using System.ComponentModel.DataAnnotations;
 
 namespace OnlineShop.API.Data
 {
@@ -13,6 +16,9 @@ namespace OnlineShop.API.Data
         public DbSet<Category> Categories { get; set; }
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderItem> OrderItems { get; set; }
+        public DbSet<OneTimePassword> OneTimePasswords { get; set; }
+        public DbSet<Cart> Carts { get; set; }
+        public DbSet<CartItem> CartItems { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -66,7 +72,7 @@ namespace OnlineShop.API.Data
                       .IsRequired();
 
                 entity.HasOne(o => o.User)
-                      .WithMany() // or .WithMany(u => u.Orders) if you add an Orders collection in ApplicationUser
+                      .WithMany() // or .WithMany(u => u.Orders)
                       .HasForeignKey(o => o.UserId)
                       .IsRequired()
                       .OnDelete(DeleteBehavior.Restrict);
@@ -91,6 +97,64 @@ namespace OnlineShop.API.Data
                 entity.HasOne(oi => oi.Product)
                       .WithMany()
                       .HasForeignKey(oi => oi.ProductId)
+                      .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // OneTimePassword configuration
+            builder.Entity<OneTimePassword>(entity =>
+            {
+                entity.HasKey(o => o.Id);
+
+                entity.Property(o => o.Code)
+                      .IsRequired()
+                      .HasMaxLength(6);
+
+                entity.Property(o => o.ExpiryTime)
+                      .IsRequired();
+
+                entity.Property(o => o.IsActive)
+                      .IsRequired();
+
+                entity.HasOne(o => o.User)
+                      .WithMany() // or WithMany(u => u.OneTimePasswords)
+                      .HasForeignKey(o => o.UserId)
+                      .IsRequired()
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            // Cart configuration
+builder.Entity<Cart>(entity =>
+{
+    entity.HasKey(c => c.UserId);
+
+    entity.HasOne(c => c.User)
+          .WithOne(u => u.Cart) // <-- now works
+          .HasForeignKey<Cart>(c => c.UserId)
+          .IsRequired()
+          .OnDelete(DeleteBehavior.Cascade);
+
+    entity.HasMany(c => c.Items)
+          .WithOne(ci => ci.Cart)
+          .HasForeignKey(ci => ci.CartId)
+          .IsRequired()
+          .OnDelete(DeleteBehavior.Cascade);
+});
+
+            // CartItem configuration
+            builder.Entity<CartItem>(entity =>
+            {
+                entity.HasKey(ci => ci.Id);
+
+                entity.HasOne(ci => ci.Cart)
+                      .WithMany(c => c.Items)
+                      .HasForeignKey(ci => ci.CartId)
+                      .IsRequired()
+                      .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(ci => ci.Product)
+                      .WithMany()
+                      .HasForeignKey(ci => ci.ProductId)
+                      .IsRequired()
                       .OnDelete(DeleteBehavior.Restrict);
             });
         }
