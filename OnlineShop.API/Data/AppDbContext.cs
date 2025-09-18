@@ -1,10 +1,8 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using OnlineShop.API.Models;
 using OnlineShop.API.Models.Entities;
-using System.ComponentModel.DataAnnotations;
 
 namespace OnlineShop.API.Data
 {
@@ -19,6 +17,7 @@ namespace OnlineShop.API.Data
         public DbSet<OneTimePassword> OneTimePasswords { get; set; }
         public DbSet<Cart> Carts { get; set; }
         public DbSet<CartItem> CartItems { get; set; }
+        public DbSet<Testimonial> Testimonials { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -36,18 +35,10 @@ namespace OnlineShop.API.Data
             // Product configuration
             builder.Entity<Product>(entity =>
             {
-                entity.Property(p => p.Name)
-                      .IsRequired()
-                      .HasMaxLength(100);
-
-                entity.Property(p => p.Description)
-                      .HasMaxLength(1000);
-
-                entity.Property(p => p.ImageUrl)
-                      .HasMaxLength(500);
-
-                entity.Property(p => p.Price)
-                      .HasColumnType("decimal(18,2)");
+                entity.Property(p => p.Name).IsRequired().HasMaxLength(100);
+                entity.Property(p => p.Description).HasMaxLength(1000);
+                entity.Property(p => p.ImageUrl).HasMaxLength(500);
+                entity.Property(p => p.Price).HasColumnType("decimal(18,2)");
 
                 entity.HasOne(p => p.Category)
                       .WithMany(c => c.Products)
@@ -58,28 +49,20 @@ namespace OnlineShop.API.Data
             // Category configuration
             builder.Entity<Category>(entity =>
             {
-                entity.Property(c => c.Name)
-                      .IsRequired()
-                      .HasMaxLength(100);
+                entity.Property(c => c.Name).IsRequired().HasMaxLength(100);
             });
 
             // Order configuration
             builder.Entity<Order>(entity =>
             {
                 entity.HasKey(o => o.Id);
-
-                entity.Property(o => o.Status)
-                      .IsRequired();
-
+                entity.Property(o => o.Status).IsRequired();
                 entity.HasOne(o => o.User)
                       .WithMany() // or .WithMany(u => u.Orders)
                       .HasForeignKey(o => o.UserId)
                       .IsRequired()
                       .OnDelete(DeleteBehavior.Restrict);
-
-                entity.Property(o => o.TotalAmount)
-                      .HasColumnType("decimal(18,2)");
-
+                entity.Property(o => o.TotalAmount).HasColumnType("decimal(18,2)");
                 entity.HasMany(o => o.OrderItems)
                       .WithOne(oi => oi.Order)
                       .HasForeignKey(oi => oi.OrderId)
@@ -90,10 +73,7 @@ namespace OnlineShop.API.Data
             builder.Entity<OrderItem>(entity =>
             {
                 entity.HasKey(oi => oi.Id);
-
-                entity.Property(oi => oi.UnitPrice)
-                      .HasColumnType("decimal(18,2)");
-
+                entity.Property(oi => oi.UnitPrice).HasColumnType("decimal(18,2)");
                 entity.HasOne(oi => oi.Product)
                       .WithMany()
                       .HasForeignKey(oi => oi.ProductId)
@@ -104,17 +84,9 @@ namespace OnlineShop.API.Data
             builder.Entity<OneTimePassword>(entity =>
             {
                 entity.HasKey(o => o.Id);
-
-                entity.Property(o => o.Code)
-                      .IsRequired()
-                      .HasMaxLength(6);
-
-                entity.Property(o => o.ExpiryTime)
-                      .IsRequired();
-
-                entity.Property(o => o.IsActive)
-                      .IsRequired();
-
+                entity.Property(o => o.Code).IsRequired().HasMaxLength(6);
+                entity.Property(o => o.ExpiryTime).IsRequired();
+                entity.Property(o => o.IsActive).IsRequired();
                 entity.HasOne(o => o.User)
                       .WithMany() // or WithMany(u => u.OneTimePasswords)
                       .HasForeignKey(o => o.UserId)
@@ -123,22 +95,22 @@ namespace OnlineShop.API.Data
             });
 
             // Cart configuration
-builder.Entity<Cart>(entity =>
-{
-    entity.HasKey(c => c.UserId);
+            builder.Entity<Cart>(entity =>
+            {
+                entity.HasKey(c => c.UserId);
 
-    entity.HasOne(c => c.User)
-          .WithOne(u => u.Cart) // <-- now works
-          .HasForeignKey<Cart>(c => c.UserId)
-          .IsRequired()
-          .OnDelete(DeleteBehavior.Cascade);
+                entity.HasOne(c => c.User)
+                      .WithOne(u => u.Cart)
+                      .HasForeignKey<Cart>(c => c.UserId)
+                      .IsRequired()
+                      .OnDelete(DeleteBehavior.Cascade);
 
-    entity.HasMany(c => c.Items)
-          .WithOne(ci => ci.Cart)
-          .HasForeignKey(ci => ci.CartId)
-          .IsRequired()
-          .OnDelete(DeleteBehavior.Cascade);
-});
+                entity.HasMany(c => c.Items)
+                      .WithOne(ci => ci.Cart)
+                      .HasForeignKey(ci => ci.CartId)
+                      .IsRequired()
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
 
             // CartItem configuration
             builder.Entity<CartItem>(entity =>
@@ -156,6 +128,16 @@ builder.Entity<Cart>(entity =>
                       .HasForeignKey(ci => ci.ProductId)
                       .IsRequired()
                       .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // Testimonial configuration
+            builder.Entity<Testimonial>(entity =>
+            {
+                entity.HasKey(t => t.Id);
+                entity.Property(t => t.Name).IsRequired().HasMaxLength(100);
+                entity.Property(t => t.Feedback).IsRequired().HasMaxLength(1000);
+                entity.Property(t => t.ImageUrl).HasMaxLength(500);
+                entity.Property(t => t.CreatedAt).IsRequired();
             });
         }
     }
